@@ -28,7 +28,7 @@
 | `main.py` / `app.py` | CLI / Streamlit入口 |
 | `evaluate_rag.py` | 题集校验、独立评测、指标及唯一报告 |
 
-仓库当前没有锁定依赖版本清单，不能声称在任意新环境中一键复现。向量嵌入配置沿用既有Chroma集合，本项目未在问答入口显式指定独立Embedding模型；迁移数据库时须核对原集合与本地资源配置。
+`requirements.txt`仅列4个直接运行依赖，版本来自本地虚拟环境的包METADATA：Streamlit 1.66.0、ChromaDB 1.5.9、Ollama Python客户端0.6.3、sentence-transformers 6.1.0。这是已安装版本记录，不是全新环境兼容性验证或传递依赖锁文件；torch、transformers等由安装器解析。unittest属于标准库，不需要另装pytest。向量嵌入配置沿用Chroma集合默认行为，本项目未显式指定独立Embedding模型；迁移数据库时须核对原集合与本地资源配置。
 
 ## 系统架构
 
@@ -38,11 +38,74 @@
 
 ## 本地运行
 
-在项目根目录执行以下PowerShell命令。前提：已有可用Python 3.12虚拟环境及Streamlit、chromadb、ollama、sentence-transformers依赖；本地模型资源已就绪；已有包含 `company_policy` 集合的独立Chroma数据库副本。本文不执行安装、同步或创建数据库。
+### 1. Windows环境安装
+
+以下命令供使用者在项目根目录手动执行，本轮文档整理没有执行安装、模型下载或数据库写入。先安装Python 3.12并确认Windows Python启动器可用。在新的项目工作副本中执行，不要覆盖已有虚拟环境：
+
+```powershell
+py -3.12 --version
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m unittest discover -v
+```
+
+使用虚拟环境解释器完整相对路径，不依赖PowerShell激活脚本执行策略。若创建或安装步骤失败，请停止后续启动。当前未固定传递依赖、Ollama服务端版本或模型文件修订版本，新环境仍需验证。
+
+### 2. 准备本地模型
+
+Ollama Python包不包含Ollama服务端。请先单独安装Ollama桌面/服务端并确保命令可用，再手动准备模型：
+
+```powershell
+ollama --version
+ollama pull qwen2.5:3b
+ollama list
+# Ollama桌面后台已运行时无需重复启动；没有后台服务时另开终端运行：
+ollama serve
+```
+
+`pull`下载模型，不进行问答推理。Reranker在首次加载时可能下载 `BAAI/bge-reranker-base`，默认Chroma嵌入函数首次建库/查询也可能下载资源；离线演示前须在本机预先完成加载验证。模型缓存不随仓库发布，下载需要网络、磁盘空间及可用资源。没有运行实测，不承诺特定显存、内存或加载时长。
+
+### 3. 准备独立示例数据库
+
+**仓库不发布Chroma数据库副本。仅有 `company_policy.txt` 不等于数据库已经构建完成。** 网页和评测只打开已有库，不能直接拿空目录启动。
+
+核实结果：现有 `policy_sync.py` 的CLI固定写入正式 `chroma_db`，没有 `--test-db-path` 初始化参数；`chroma_test.py`同样不是安全演示初始化入口。不要用这两个脚本准备回归测试库。
+
+以下是手动组合已有 `load_policy_documents()` 和 `sync_policies()` API的示例命令，不是新增CLI参数。它只创建项目根目录下全新的 `rag_demo_copy`，目录已存在即停止，且显式拒绝正式库及其子目录。**此步骤尚未在全新环境执行验证**，建议在单独下载的项目工作副本中操作；失败后可能留有部分新库，不要直接重跑或改写既有库。
+
+```powershell
+$initDemo = @'
+from pathlib import Path
+from policy_loader import load_policy_documents
+from policy_sync import sync_policies
+from main import DATABASE_PATH, validate_test_database
+import chromadb
+
+documents = load_policy_documents()
+target = Path('rag_demo_copy').resolve()
+formal = DATABASE_PATH.resolve()
+if target == formal or formal in target.parents:
+    raise ValueError('Refusing formal database')
+target.mkdir(exist_ok=False)
+client = chromadb.PersistentClient(path=str(target))
+collection = client.get_or_create_collection(name='company_policy')
+print(sync_policies(collection, documents))
+validate_test_database(target)
+print('Independent demo database prepared')
+'@
+.\.venv\Scripts\python.exe -c $initDemo
+```
+
+该操作写入新建示例库，不是只读操作；没有触碰正式库的必要。它使用当前Chroma默认嵌入函数，不能宣称完全复现历史向量库或历史分数。建库进程结束后，再把这个已有独立库配置给网页；评测请使用另行准备的独立副本。
+
+### 4. 启动网页与CLI
+
+已完成上述准备后，在项目根目录执行：
 
 ```powershell
 # 将示例路径替换为已有独立副本；不要指向正式chroma_db。
-$env:POLICY_APP_TEST_DB_PATH = 'D:\rag_demo_copy'
+$env:POLICY_APP_TEST_DB_PATH = (Resolve-Path .\rag_demo_copy).Path
 .\.venv\Scripts\python.exe -m streamlit run .\app.py --server.address 127.0.0.1 --server.port 8501
 ```
 
@@ -51,7 +114,7 @@ $env:POLICY_APP_TEST_DB_PATH = 'D:\rag_demo_copy'
 CLI也可显式使用已有副本：
 
 ```powershell
-.\.venv\Scripts\python.exe .\main.py --test-db-path 'D:\rag_demo_copy'
+.\.venv\Scripts\python.exe .\main.py --test-db-path .\rag_demo_copy
 ```
 
 网页与评测沿用安全路径检查：拒绝正式库及其子目录、符号链接/Windows重解析点、硬链接等不安全情况；要求既有 `chroma.sqlite3`，初始化使用 `get_collection`。不自动同步政策。`policy_sync.py` 是独立的显式写入工具，不属于演示启动流程；Chroma客户端本身也不构成数据库文件的只读保证。

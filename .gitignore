@@ -1,0 +1,49 @@
+.env
+.env.*
+!.env.example
+
+# Python local environment and generated artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.bak
+
+# Local vector databases and independent integration copies
+chroma_db/
+chroma_db*/
+*_chroma_db/
+rag_eval_copy/
+rag_demo_copy/
+test_db*/
+eval_db*/
+*_db_copy/
+cli-integration-*/
+eval-integration-*/
+web-integration-*/
+sync-check-*/
+**/chroma.sqlite3*
+
+# Model/download caches
+.cache/
+.ollama/
+.huggingface/
+model_cache/
+models/
+
+# Private configuration; keep the shared non-secret theme config
+.streamlit/secrets.toml
+.streamlit/secrets.*.toml
+*.local.toml
+*.local.json
+.aws/
+local_settings.*
+credentials*.json
+*.pem
+*.key
+
+# Raw reports/logs may contain machine paths. Publish separately sanitized examples.
+eval_reports/
+task*_test_failures.txt
+*.log

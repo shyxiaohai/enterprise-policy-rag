@@ -28,7 +28,7 @@
 | `main.py` / `app.py` | CLI / Streamlit入口 |
 | `evaluate_rag.py` | 题集校验、独立评测、指标及唯一报告 |
 
-`requirements.txt`仅列4个直接运行依赖，版本来自本地虚拟环境的包METADATA：Streamlit 1.66.0、ChromaDB 1.5.9、Ollama Python客户端0.6.3、sentence-transformers 6.1.0。这是已安装版本记录，不是全新环境兼容性验证或传递依赖锁文件；torch、transformers等由安装器解析。unittest属于标准库，不需要另装pytest。向量嵌入配置沿用Chroma集合默认行为，本项目未显式指定独立Embedding模型；迁移数据库时须核对原集合与本地资源配置。
+`requirements.txt`原有4个直接运行依赖的版本来自本地虚拟环境的包METADATA：Streamlit 1.66.0、ChromaDB 1.5.9、Ollama Python客户端0.6.3、sentence-transformers 6.1.0。新增API依赖FastAPI、Pydantic v2、Uvicorn及接口测试依赖HTTPX使用版本范围；维护者已在实际Windows Python 3.12.0环境完成本地验证，但不代表范围内所有版本均已验证。这不是全新环境兼容性验证或传递依赖锁文件；torch、transformers等由安装器解析。unittest属于标准库，不需要另装pytest。向量嵌入配置沿用Chroma集合默认行为，本项目未显式指定独立Embedding模型；迁移数据库时须核对原集合与本地资源配置。
 
 ## 系统架构
 
@@ -139,6 +139,19 @@ CLI也可显式使用已有副本：
 
 网页与评测沿用安全路径检查：拒绝正式库及其子目录、符号链接/Windows重解析点、硬链接等不安全情况；要求既有 `chroma.sqlite3`，初始化使用 `get_collection`。不自动同步政策。`policy_sync.py` 是独立的显式写入工具，不属于演示启动流程；Chroma客户端本身也不构成数据库文件的只读保证。
 
+### 5. 本地FastAPI接口
+
+新增 `GET /health` 和 `POST /ask`，复用原 `RagService`，不修改RAG规则。共享初始化与问答锁位于 `service_resources.py`；网页缓存及每次重绘时的副本检查保留。
+
+```powershell
+$env:POLICY_API_TEST_DB_PATH = (Resolve-Path .\rag_demo_copy).Path
+.\.venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
+```
+
+只使用已有独立副本，不自动建库或回退正式库。健康检查不发起生成；POST接收 `{"question":"二线城市住宿标准是多少"}`，实际问答可能调用Qwen。仅公开status、answer、policies、message，引用来自实际policies，默认隐藏候选及诊断。当前未配置身份认证，不应对公网开放；网页与API各自有进程内锁，建议分别使用独立副本。
+
+维护者已在实际Windows Python 3.12.0环境验证：`pip check`无依赖冲突，191项测试全部通过；`GET /health`返回200且初始化成功；普通住宿问答返回200、400元/天及 `hotel_002` 引用；餐饮超额问题返回200、`guarded`及 `meal_001` 引用，未擅自判断160元能否全额报销。安装与请求示例见 [API使用说明](docs/api.md)。本地通过不代表已完成全新环境复现、生产部署或安全压力测试。
+
 ## 政策引用与安全边界
 
 模型引用编号必须属于本次候选，来源必须匹配，已提供的政策内容/原文必须完整一致；正文显式原文、额外编号和来源也会校验。当前解析器允许引用区省略政策内容，最终展示会用候选中的完整原文补齐，不能描述成“所有模型输出都必须逐字包含原文”。Python简单回退另会对照已加载政策核对内容和来源。
@@ -155,7 +168,7 @@ CLI也可显式使用已有副本：
 
 ## 测试与评测事实
 
-测试记录由本地运行反馈提供：172项unittest此前通过；网页工程化新增4项后为176项，主题样式再新增2项后为178项。**根据项目维护者本地运行反馈，178项unittest已通过**。此记录并非代理环境复跑结果；代理环境的指定虚拟环境此前无法启动Python 3.12，不能把静态检查当成全量测试通过。
+根据项目维护者在真实Windows Python 3.12.0环境的运行反馈：**原有178项测试与新增13项API测试，共191项全部通过**，`pip check`返回 `No broken requirements found`。这是维护者本地实测记录，并非本轮文档核对重新执行的结果；不代表已完成全新环境复现、生产部署或安全压力测试。
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -v

@@ -2,13 +2,12 @@
 
 import os
 import re
-from threading import Lock
 
 import streamlit as st
 
 from main import validate_test_database
 from policy_loader import load_policy_documents
-from rag_service import RagService
+from service_resources import SharedService, build_service
 
 
 TEST_DB_ENV = "POLICY_APP_TEST_DB_PATH"
@@ -58,36 +57,11 @@ def display_text(value):
     return re.sub(r"(?<![\w:/])/(?!/)[^\s\n，；。]+", "[本地路径已隐藏]", text)
 
 
-class SharedService:
-    """整次问答串行执行，保护共享的检索、重排序和模型资源。"""
-
-    def __init__(self, service):
-        self.service = service
-        self.lock = Lock()
-
-    def answer_question(self, question):
-        with self.lock:
-            return self.service.answer_question(question)
-
-
 @st.cache_resource(show_spinner="正在加载问答资源…")
 def get_resources(database_path, policy_bytes):
     # 缓存键包含政策内容，避免文件更新后沿用旧的政策标签。
-    path = validate_test_database(database_path)
-    documents = load_policy_documents()
-    from pathlib import Path
-    policy_file = Path(__file__).resolve().parent / "knowledge_base" / "company_policy.txt"
-    if policy_file.read_bytes() != policy_bytes:
-        raise ValueError("政策文件加载期间发生变化")
-
-    import chromadb
-    import ollama
-    from sentence_transformers import CrossEncoder
-
-    client = chromadb.PersistentClient(path=str(path))
-    collection = client.get_collection(name="company_policy")
-    reranker = CrossEncoder("BAAI/bge-reranker-base")
-    return SharedService(RagService(collection, reranker, documents, chat=ollama.chat))
+    return build_service(database_path, policy_bytes,
+                         validator=validate_test_database, loader=load_policy_documents)
 
 
 def submit_question(service, question):

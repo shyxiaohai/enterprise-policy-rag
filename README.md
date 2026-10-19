@@ -1,8 +1,21 @@
-# 企业AI智能知识库 · Streamlit v1.0
+# 企业政策RAG与服装店经营诊断Agent · AI应用工程实践
 
-面向企业内部政策查询的本地RAG演示项目。员工可查询出差住宿、餐饮补贴、交通报销及年假规定，并查看政策依据。项目重点是证据追溯、条件判断、保守回答与可复核评测，适合作为初级AI解决方案工程师的求职作品。
+面向初级AI应用工程师、AI解决方案工程师的本地学习作品：从企业政策RAG、FastAPI服务化，逐步扩展到单工具Function Calling和多工具经营调查。共同重点是业务口径、证据追溯、参数验证、安全边界与可复核测试，适合在深圳、广州相关岗位面试中展示自己能解释和验证的工程过程。
+
+企业政策模块支持出差住宿、餐饮补贴、交通报销及年假查询；服装店模块使用**完全虚构数据**，不连接真实企业库存或经营系统。维护者已将原企业RAG与FastAPI部分发布至公开GitHub；发布代码不等于已部署生产服务。
 
 当前知识源为 `knowledge_base/company_policy.txt`，按固定四章节格式解析为7条政策。它是范围有限的演示系统，尚不支持任意PDF上传、多租户权限或生产部署。
+
+## 项目模块与阅读顺序
+
+| 模块 | 业务作用 | 入口与边界 |
+| --- | --- | --- |
+| 企业政策RAG | 找到适用条款，保守回答并展示引用 | `main.py` / `app.py` → `RagService`；使用已有独立数据库副本 |
+| FastAPI接口 | 让其他本地应用通过HTTP调用同一问答服务 | `api.py`，`GET /health` / `POST /ask`；仅本机、单worker、无认证 |
+| 单工具库存助手 | 从自然语言提出库存查询，Python验证并执行 | [库存助手说明](demos/inventory_assistant/README.md)，只读虚构内存数据，无Chroma依赖 |
+| 多工具经营诊断Agent | 根据销售证据选择商品，再调查补货及历史库存 | [经营诊断说明](demos/store_diagnosis/README.md)，动态工具开放、来源追踪、预算及一次继续提醒 |
+
+面试阅读入口：[服装店经营诊断案例与1分钟介绍](docs/store_agent_case_study.md)。建议先理解三个确定性业务工具，再阅读Agent如何选择和验证工具，不必从长trace日志开始。
 
 ## 核心功能
 
@@ -12,6 +25,9 @@
 - 部分联合问题在缺少证据时，对明确子主题独立检索、重新评分、筛选合并；不直接放行原低分候选。
 - 生成引用校验失败时丢弃模型正文；匹配有限简单问法且最终证据完整时，用Python构造真实原文回答。
 - CLI、模拟单元测试及独立数据库评测入口。网页只在提交时问答，会话重绘沿用最近结果；共享资源通过锁串行执行问答。
+- 独立库存助手：严格区分有货、0库存、商品不存在及规格无记录；参数格式与原始用户条件分别核对。
+- 独立多工具Agent：只开放当前有证据支持的工具；Qwen原生tool_calls提出请求，Python执行三个只读工具、记录证据并生成事实报告。
+- Agent保留一次批次串行重试及一次任务继续提醒，两者共用默认6次模型请求、5次工具尝试和90秒等待预算；未完成时如实返回partial。
 
 ## 技术栈与模块
 
@@ -22,11 +38,15 @@
 | ChromaDB | 持久化向量集合 `company_policy` 的查询 |
 | sentence-transformers / `BAAI/bge-reranker-base` | 候选文本对重排序 |
 | Ollama / `qwen2.5:3b` | 本地回答生成 |
+| FastAPI / Uvicorn / Pydantic v2 | 本机HTTP服务、请求响应及工具参数结构验证 |
 | `policy_loader.py` | 固定格式政策解析及元数据构造 |
 | `rag_service.py` | 召回、筛选、有限补检索与问答编排 |
 | `policy_evidence_guard.py` / `policy_citations.py` | 业务保护、相关性定位、引用验证与原文回退 |
 | `main.py` / `app.py` | CLI / Streamlit入口 |
 | `evaluate_rag.py` | 题集校验、独立评测、指标及唯一报告 |
+| `service_resources.py` | Streamlit与FastAPI共用初始化和问答锁 |
+| `demos/inventory_assistant/` | 只读库存函数、单工具原生调用与有限用户条件核对 |
+| `demos/store_diagnosis/` | 虚构销售/库存/补货工具，以及受控多工具Agent |
 
 `requirements.txt`原有4个直接运行依赖的版本来自本地虚拟环境的包METADATA：Streamlit 1.66.0、ChromaDB 1.5.9、Ollama Python客户端0.6.3、sentence-transformers 6.1.0。新增API依赖FastAPI、Pydantic v2、Uvicorn及接口测试依赖HTTPX使用版本范围；维护者已在实际Windows Python 3.12.0环境完成本地验证，但不代表范围内所有版本均已验证。这不是全新环境兼容性验证或传递依赖锁文件；torch、transformers等由安装器解析。unittest属于标准库，不需要另装pytest。向量嵌入配置沿用Chroma集合默认行为，本项目未显式指定独立Embedding模型；迁移数据库时须核对原集合与本地资源配置。
 
@@ -35,6 +55,8 @@
 网页调用共享的 `RagService.answer_question()`。服务先处理明确主题排除，再召回、重排序及筛选，必要时补检索，随后执行必需条件检查和业务保护。安全规则可以直接返回；普通生成结果需经引用验证，失败后只允许有限原文回退。
 
 详细分支与真实先后关系见 [系统架构](docs/architecture.md)。`retrieved`、`reranked` 是首次查询快照；`final_policies` 是筛选及补检索合并后的候选。页面引用区使用服务返回的 `policies`，不把全部候选当作已验证的最终引用。业务保护分支的 `policies` 表示规则返回的依据，不能笼统宣称其全部经过模型引用解析。
+
+两个Agent demo与RAG入口相互独立：它们不调用RagService或初始化Chroma。单工具助手让Qwen提出一次只读查询；经营Agent循环执行“证据决定候选菜单→模型选择工具→Python验证并执行→保存事实”，最终报告由Python模板生成，不采纳模型编造的金额或因果结论。模型选择不是固定执行脚本，但开放规则、执行许可和报告结构由确定性代码控制。
 
 ## 系统运行截图
 
@@ -84,7 +106,7 @@ ollama list
 ollama serve
 ```
 
-`pull`下载模型，不进行问答推理。Reranker在首次加载时可能下载 `BAAI/bge-reranker-base`，默认Chroma嵌入函数首次建库/查询也可能下载资源；离线演示前须在本机预先完成加载验证。模型缓存不随仓库发布，下载需要网络、磁盘空间及可用资源。没有运行实测，不承诺特定显存、内存或加载时长。
+`pull`下载模型，不进行问答推理。Reranker在首次加载时可能下载 `BAAI/bge-reranker-base`，默认Chroma嵌入函数首次建库/查询也可能下载资源；离线演示前须在本机预先完成加载验证。模型缓存不随仓库发布，下载需要网络、磁盘空间及可用资源。没有跨硬件基准测试，不承诺特定显存、内存或加载时长。
 
 ### 3. 准备独立示例数据库
 
@@ -152,6 +174,30 @@ $env:POLICY_API_TEST_DB_PATH = (Resolve-Path .\rag_demo_copy).Path
 
 维护者已在实际Windows Python 3.12.0环境验证：`pip check`无依赖冲突，191项测试全部通过；`GET /health`返回200且初始化成功；普通住宿问答返回200、400元/天及 `hotel_002` 引用；餐饮超额问题返回200、`guarded`及 `meal_001` 引用，未擅自判断160元能否全额报销。安装与请求示例见 [API使用说明](docs/api.md)。本地通过不代表已完成全新环境复现、生产部署或安全压力测试。
 
+### 6. 运行独立Agent演示
+
+两个demo使用同一Python 3.12环境和已有Pydantic/Ollama依赖，不需要准备Chroma数据库，也不需要启动Streamlit或FastAPI。
+
+先运行离线测试和确定性查询：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest demos.inventory_assistant.test_inventory demos.inventory_assistant.test_assistant demos.inventory_assistant.test_grounding -v
+.\.venv\Scripts\python.exe -m unittest demos.store_diagnosis.test_data demos.store_diagnosis.test_tools demos.store_diagnosis.test_agent demos.store_diagnosis.test_availability demos.store_diagnosis.test_progress demos.store_diagnosis.test_diagnostics -v
+.\.venv\Scripts\python.exe -c "from demos.store_diagnosis.tools import query_sales; print(query_sales())"
+```
+
+确认本机Ollama服务和模型已准备后，手动执行真实推理：
+
+```powershell
+ollama --version
+ollama list
+ollama show qwen2.5:3b
+.\.venv\Scripts\python.exe -m demos.inventory_assistant.cli '基础T恤白色M码还有几件？' --trace
+.\.venv\Scripts\python.exe -m demos.store_diagnosis.cli '最近营业额为什么下降？帮我调查销售、库存和补货环节。' --trace
+```
+
+两个demo各有独立虚构数据，数量不能混用：单工具示例白色M码为8件；经营诊断模块同名规格在2026-09-14历史快照为0件。经营数据截止2026-09-18，9月16日到货不能加回9月14日快照。trace用于检查来源、菜单和完成度，不作为最终业务结论；单工具trace还包含未经语义验证的模型回复，公开前须审阅。
+
 ## 政策引用与安全边界
 
 模型引用编号必须属于本次候选，来源必须匹配，已提供的政策内容/原文必须完整一致；正文显式原文、额外编号和来源也会校验。当前解析器允许引用区省略政策内容，最终展示会用候选中的完整原文补齐，不能描述成“所有模型输出都必须逐字包含原文”。Python简单回退另会对照已加载政策核对内容和来源。
@@ -168,7 +214,15 @@ $env:POLICY_API_TEST_DB_PATH = (Resolve-Path .\rag_demo_copy).Path
 
 ## 测试与评测事实
 
-根据项目维护者在真实Windows Python 3.12.0环境的运行反馈：**原有178项测试与新增13项API测试，共191项全部通过**，`pip check`返回 `No broken requirements found`。这是维护者本地实测记录，并非本轮文档核对重新执行的结果；不代表已完成全新环境复现、生产部署或安全压力测试。
+根据维护者最新Windows Python 3.12环境反馈：**全项目351项自动化测试全部通过，测试运行耗时1.217秒**。这是离线测试运行记录，不是模型推理耗时、接口延迟或性能承诺，也不是本轮代理环境重新执行的结果。此前RAG与API阶段191项测试及`pip check`无依赖冲突的记录保留为历史验证；本地通过不代表已完成全新环境复现、生产部署或安全压力测试。
+
+| 验证类型 | 已确认事实 | 不能据此宣称 |
+| --- | --- | --- |
+| 离线自动化 | 维护者351项通过；Fake chat验证错误分支、来源、预算和报告 | 不证明真实模型每次遵守工具协议 |
+| 真实本机Qwen | 维护者确认单工具库存成功，多工具完成销售→补货→历史库存链路 | 不证明所有中文表达、多次运行或其他模型均稳定 |
+| RAG回归 | 下方24题报告自动召回和状态指标 | 不等于答案语义准确率或未见数据泛化成绩 |
+
+经营Agent真实路径取得SALE-P1、SALE-P2、REP-001及INV-002；案例见[经营诊断项目说明](docs/store_agent_case_study.md)。本轮发布前审查只做静态检查，不重新运行模型。
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -v
@@ -198,10 +252,13 @@ $env:POLICY_API_TEST_DB_PATH = (Resolve-Path .\rag_demo_copy).Path
 - 主题规则和回退语法有限；复杂否定、条件组合及口语表达可能不覆盖。多城市即便证据齐全也保守返回guarded。
 - 只有7条结构化政策，不等同于大规模企业知识库；尚无身份认证、权限隔离、监控或生产SLA。
 - 依赖本地Python、Ollama、模型缓存及既有向量库；首次加载耗时与报告中的单次问答耗时不同。
+- 服装店数据全部虚构，demo不接真实库存；两个demo的数据集彼此独立。有限商品与领域语法可能误拒复杂表达，不支持通用业务系统操作。
+- Agent可能提前停止、填错参数或耗尽预算；一次提醒不保证完成。完成度仅表示领域至少取得一次可信结果，不等于所有SKU调查完或因果得到证明。
+- Agent的线程等待超时不保证中止底层Ollama生成，尚无生产级资源隔离、鉴权或并发治理。默认只读不等于恶意Python代码沙箱。
 
 面向深圳、广州初级AI解决方案工程师岗位，可围绕“业务需求拆解→RAG流程→可追溯引用→风险保护→评测与界面交付”介绍本项目。仅陈述自己实际完成、能现场解释的工作，不包装为企业生产上线项目或声称不存在的客户收益。
 
-文档入口：[3分钟演示脚本](docs/demo_script.md)、[网页启动说明](WEB_DEMO.md)、[回归集说明](HOLDOUT_EVALUATION.md)。真实运行截图见上方“系统运行截图”，图片位于 `docs/images/`。
+文档入口：[经营Agent案例与面试介绍](docs/store_agent_case_study.md)、[Agent运行说明](demos/store_diagnosis/README.md)、[单工具助手说明](demos/inventory_assistant/README.md)、[API说明](docs/api.md)、[RAG架构](docs/architecture.md)、[3分钟RAG演示脚本](docs/demo_script.md)、[网页启动说明](WEB_DEMO.md)、[回归集说明](HOLDOUT_EVALUATION.md)。真实RAG运行截图见上方“系统运行截图”，图片位于 `docs/images/`；没有虚构Agent截图。
 
 公开仓库前请人工检查：原始报告含本机绝对路径，默认忽略；已被Git跟踪的文件不会因 `.gitignore` 自动移除。对外引用报告应另制作脱敏样例，保留原指标和审核状态，不修改历史原件。
 
